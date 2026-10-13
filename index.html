@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en" data-show="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Karaoke Remote · 노래방 리모컨</title>
+    <meta
+      name="description"
+      content="A Chrome extension that works like a karaoke machine's remote: change the key, pitch and speed of whatever is playing in a tab."
+    />
+    <meta property="og:title" content="Karaoke Remote · 노래방 리모컨" />
+    <meta
+      property="og:description"
+      content="A karaoke machine's remote for any browser tab: key, pitch and speed, with vocal removal, beats and a song queue in Pro."
+    />
+    <meta property="og:image" content="icon.png" />
+    <link rel="icon" href="icon.png" />
+    <style>
+      @font-face {
+        font-family: 'Karaoke Caption';
+        src: url('title.woff2') format('woff2');
+        font-display: swap;
+      }
+
+      :root {
+        color-scheme: dark;
+        --screen: #0d2a94;
+        --well: #081d6e;
+        --ink: #050f45;
+        --text: #ffffff;
+        --soft: #bcc7ee;
+        --line: rgb(255 255 255 / 0.28);
+        --voice: #4ccaff; /* the colour sung lyrics take on the machine */
+        --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--screen);
+      }
+
+      body {
+        margin: 0;
+        background: var(--screen);
+        color: var(--text);
+        font: 17px/1.6 system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      ::selection {
+        background: var(--text);
+        color: var(--ink);
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--text);
+        outline-offset: 3px;
+        border-radius: 4px;
+      }
+
+      a {
+        color: var(--text);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      a:hover {
+        text-decoration-thickness: 2px;
+      }
+
+      /* One language at a time; both if the script that picks one has not run. */
+      html[data-show='en'] [data-lang='ko'],
+      html[data-show='ko'] [data-lang='en'] {
+        display: none;
+      }
+
+      .page {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 20px 0;
+      }
+
+      header img {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+      }
+
+      header .name {
+        font-weight: 700;
+      }
+
+      .languages {
+        display: flex;
+        gap: 6px;
+        margin-left: auto;
+      }
+
+      .languages button {
+        min-height: 32px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: none;
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+        cursor: pointer;
+        transition: background 0.16s var(--ease);
+      }
+
+      .languages button:hover:not([aria-pressed='true']) {
+        background: rgb(255 255 255 / 0.1);
+      }
+
+      .languages button[aria-pressed='true'] {
+        border-color: var(--text);
+        background: var(--text);
+        color: var(--ink);
+        font-weight: 700;
+      }
+
+      .spread {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 72px;
+        align-items: center;
+        padding: 56px 0 88px;
+      }
+
+      .spread.turned {
+        grid-template-columns: 320px minmax(0, 1fr);
+        border-top: 1px solid var(--line);
+        padding-top: 88px;
+      }
+
+      .spread > div {
+        max-width: 34em;
+      }
+
+      /* The name, set the way the machine sets its lyrics: white with a navy outline, filling with colour as it is sung. */
+      h1 {
+        position: relative;
+        width: fit-content;
+        margin: 0 0 20px;
+        font: 400 clamp(46px, 9.5vw, 92px) / 1.08 'Karaoke Caption', system-ui, sans-serif;
+        letter-spacing: 0.01em;
+        -webkit-text-stroke: 0.14em var(--ink);
+        paint-order: stroke fill;
+      }
+
+      h1::after {
+        content: attr(data-text);
+        position: absolute;
+        inset: 0;
+        color: var(--voice);
+        -webkit-text-stroke: 0;
+        animation: sing 2.6s linear 0.5s backwards;
+      }
+
+      @keyframes sing {
+        from {
+          clip-path: inset(0 100% 0 0);
+        }
+        to {
+          clip-path: inset(0 0 0 0);
+        }
+      }
+
+      .lead {
+        margin: 0 0 12px;
+        font-size: 21px;
+        line-height: 1.5;
+      }
+
+      .where {
+        margin: 0 0 40px;
+        color: var(--soft);
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        line-height: 1.3;
+      }
+
+      h2 small {
+        margin-left: 8px;
+        color: var(--soft);
+        font-size: 15px;
+        font-weight: 400;
+      }
+
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      li {
+        padding: 9px 0;
+        border-top: 1px solid var(--line);
+      }
+
+      li:last-child {
+        border-bottom: 1px solid var(--line);
+      }
+
+      p {
+        margin: 0 0 12px;
+      }
+
+      .buying {
+        margin-top: 28px;
+        color: var(--soft);
+      }
+
+      .buying strong {
+        color: var(--text);
+      }
+
+      figure {
+        margin: 0;
+      }
+
+      figure img {
+        display: block;
+        width: 320px;
+        max-width: 100%;
+        height: auto;
+        border: 1px solid rgb(255 255 255 / 0.4);
+        border-radius: 14px;
+        box-shadow: 0 18px 40px rgb(0 0 0 / 0.35);
+      }
+
+      .notes {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 72px;
+        padding: 64px 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .notes p {
+        max-width: 34em;
+        color: var(--soft);
+      }
+
+      footer {
+        padding: 28px 0 56px;
+        border-top: 1px solid var(--line);
+        color: var(--soft);
+        font-size: 15px;
+      }
+
+      footer p {
+        margin: 0 0 6px;
+      }
+
+      @media (max-width: 860px) {
+        .spread,
+        .spread.turned,
+        .notes {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 44px;
+        }
+
+        .spread {
+          padding: 32px 0 64px;
+        }
+
+        .spread.turned {
+          padding-top: 64px;
+        }
+
+        .spread.turned figure {
+          order: 2;
+        }
+
+        figure img {
+          margin: 0 auto;
+        }
+
+        .notes {
+          padding: 48px 0;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .page {
+          padding: 0 16px;
+        }
+
+        header .name {
+          display: none;
+        }
+
+        .lead {
+          font-size: 19px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        h1::after {
+          animation: none;
+        }
+
+        .languages button {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <img src="icon.png" alt="" width="32" height="32" />
+        <span class="name" data-lang="en">Karaoke Remote</span>
+        <span class="name" data-lang="ko" lang="ko">노래방 리모컨</span>
+        <div class="languages">
+          <button type="button" data-pick="en" aria-pressed="true">English</button>
+          <button type="button" data-pick="ko" aria-pressed="false" lang="ko">한국어</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="spread">
+          <div data-lang="en">
+            <h1 data-text="Karaoke Remote">Karaoke Remote</h1>
+            <p class="lead">
+              A karaoke machine's remote for any browser tab. Change the key, pitch and speed of whatever is playing, a
+              karaoke video or the original song, while you sing.
+            </p>
+            <p class="where">A Chrome extension for desktop. Its Chrome Web Store listing is on the way.</p>
+
+            <h2>Free <small>no account, no time limit</small></h2>
+            <ul>
+              <li>Key up or down by as much as 12 semitones, one press at a time</li>
+              <li>Male ↔ female key presets, 4 semitones either way</li>
+              <li>Fine pitch in cents, for a recording that is slightly off</li>
+              <li>Speed from 50% to 200% without changing the pitch</li>
+              <li>Settings kept separately for each tab</li>
+            </ul>
+          </div>
+          <div data-lang="ko" lang="ko">
+            <h1 data-text="노래방 리모컨">노래방 리모컨</h1>
+            <p class="lead">
+              어느 탭에서든 쓰는 노래방 리모컨. 노래방 반주 영상이든 원곡이든, 재생 중인 소리의 키와 피치, 속도를 부르면서
+              바꿉니다.
+            </p>
+            <p class="where">데스크톱 Chrome 확장 프로그램입니다. Chrome 웹 스토어 등록을 준비하고 있습니다.</p>
+
+            <h2>무료 <small>가입 없이, 기간 제한 없이</small></h2>
+            <ul>
+              <li>키를 한 번에 반음씩, 위아래로 12반음까지</li>
+              <li>남 ↔ 여 키 변환, 위아래로 4반음</li>
+              <li>음정이 살짝 어긋난 음원을 맞추는 센트 단위 피치</li>
+              <li>음정은 그대로 두고 속도만 50%에서 200%까지</li>
+              <li>탭마다 따로 기억하는 설정</li>
+            </ul>
+          </div>
+          <figure>
+            <img data-lang="en" src="shot-remote-en.png" width="320" height="576" alt="The Karaoke Remote popup: the song title, the key raised by 2, key presets, pitch and speed sliders, and mode buttons." />
+            <img data-lang="ko" lang="ko" src="shot-remote-ko.png" width="320" height="576" alt="노래방 리모컨 팝업: 곡 제목, 2 올린 키, 남녀 키 변환, 피치와 속도 조절, 모드 버튼." />
+          </figure>
+        </section>
+
+        <section class="spread turned">
+          <figure>
+            <img data-lang="en" src="shot-queue-en.png" width="320" height="576" alt="The queue tab: a box for pasting a link, and three songs lined up to play next." />
+            <img data-lang="ko" lang="ko" src="shot-queue-ko.png" width="320" height="576" alt="예약 탭: 링크를 붙여넣는 칸과 예약된 곡 세 개." />
+          </figure>
+          <div data-lang="en">
+            <h2>Pro <small>a paid licence</small></h2>
+            <ul>
+              <li>Song queue: line up links, and the tab moves to the next song when one ends</li>
+              <li>Vocal removal, for singing over the original recording</li>
+              <li>The key the song is in, and the key you have moved it to</li>
+              <li>Disco and trot beats that follow the song's tempo</li>
+              <li>Lights around the page that pulse on the beat</li>
+              <li>A–B repeat, for practising one passage</li>
+            </ul>
+            <p class="buying">
+              <strong>How buying works.</strong> Pro is sold through Lemon Squeezy, the reseller and merchant of record,
+              which takes the payment and handles tax. A licence key arrives by email after checkout; paste it into the
+              extension's Pro panel to unlock. A key can be removed from one browser and used in another.
+            </p>
+            <p class="buying">
+              <strong>Refunds.</strong> If Pro does not work for you, write to the address below within 14 days of
+              buying it for a full refund.
+            </p>
+          </div>
+          <div data-lang="ko" lang="ko">
+            <h2>Pro <small>유료 라이선스</small></h2>
+            <ul>
+              <li>곡 예약: 링크를 줄 세워 두면 한 곡이 끝날 때 탭이 다음 곡으로 넘어갑니다</li>
+              <li>원곡에 맞춰 부를 때 쓰는 보컬 제거</li>
+              <li>곡의 원래 키와 바꾼 키 표시</li>
+              <li>곡의 템포를 따라가는 디스코 비트와 뽕짝 비트</li>
+              <li>박자에 맞춰 페이지 가장자리에서 깜빡이는 조명</li>
+              <li>한 구간을 연습하는 구간 반복</li>
+            </ul>
+            <p class="buying">
+              <strong>구매 방법.</strong> Pro는 판매 대행사(Merchant of Record)인 Lemon Squeezy를 통해 판매하며, 결제와
+              세금은 Lemon Squeezy가 처리합니다. 결제가 끝나면 이메일로 라이선스 키가 오고, 확장 프로그램의 Pro 창에
+              붙여넣으면 잠금이 풀립니다. 키는 한 브라우저에서 해제해 다른 브라우저에서 쓸 수 있습니다.
+            </p>
+            <p class="buying">
+              <strong>환불.</strong> Pro가 맞지 않으면 구매 후 14일 안에 아래 주소로 알려 주세요. 전액 환불해 드립니다.
+            </p>
+          </div>
+        </section>
+
+        <section class="notes">
+          <div data-lang="en">
+            <h2>Everything stays in your browser</h2>
+            <p>
+              The sound is changed on your own device as it plays. Nothing is recorded, uploaded or sent anywhere, and
+              there are no ads or analytics. The extension talks to a server only to check a Pro licence and to look up
+              the title of a link you queue.
+            </p>
+            <p><a href="privacy-policy.html#english">Privacy policy</a></p>
+          </div>
+          <div data-lang="en">
+            <h2>Where it works</h2>
+            <p>
+              On pages that play ordinary video or audio in Chrome, YouTube among them. A few sites do not let their
+              sound be processed; on those, speed still works and the popup says so.
+            </p>
+          </div>
+          <div data-lang="ko" lang="ko">
+            <h2>모든 처리는 브라우저 안에서</h2>
+            <p>
+              소리는 재생되는 동안 사용자의 기기에서 바뀝니다. 녹음하거나 올리거나 어디로도 보내지 않으며, 광고와 분석
+              도구가 없습니다. 확장 프로그램이 서버와 통신하는 경우는 Pro 라이선스를 확인할 때와 예약한 링크의 제목을
+              가져올 때뿐입니다.
+            </p>
+            <p><a href="privacy-policy.html">개인정보처리방침</a></p>
+          </div>
+          <div data-lang="ko" lang="ko">
+            <h2>쓸 수 있는 곳</h2>
+            <p>
+              YouTube를 비롯해 Chrome에서 일반적인 영상이나 오디오를 재생하는 페이지에서 동작합니다. 소리 처리를 허용하지
+              않는 일부 사이트에서는 속도 조절만 되며, 팝업이 이를 알려 줍니다.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p data-lang="en">Questions, refunds and support: <a href="mailto:rhosungpark@gmail.com">rhosungpark@gmail.com</a></p>
+        <p data-lang="ko" lang="ko">문의, 환불, 지원: <a href="mailto:rhosungpark@gmail.com">rhosungpark@gmail.com</a></p>
+        <p data-lang="en">
+          Karaoke Remote is made by an independent developer and is not affiliated with YouTube, Google or any maker of
+          karaoke machines.
+        </p>
+        <p data-lang="ko" lang="ko">
+          노래방 리모컨은 개인 개발자가 만들며, YouTube, Google, 노래방 기기 제조사와 관련이 없습니다.
+        </p>
+        <p>Title set in Black Han Sans, under the <a href="OFL.txt">SIL Open Font License</a>.</p>
+      </footer>
+    </div>
+
+    <script>
+      // Shows the page in Korean to a browser that prefers Korean, in English otherwise; the buttons override.
+      const show = (language) => {
+        document.documentElement.dataset.show = language;
+        document.documentElement.lang = language;
+        for (const button of document.querySelectorAll('[data-pick]')) {
+          button.setAttribute('aria-pressed', button.dataset.pick === language);
+        }
+      };
+      const asked = new URLSearchParams(location.search).get('lang');
+      const first = (navigator.languages ?? [navigator.language]).find((tag) => /^(ko|en)\b/i.test(tag)) ?? 'en';
+      show(asked === 'ko' || asked === 'en' ? asked : first.toLowerCase().startsWith('ko') ? 'ko' : 'en');
+      for (const button of document.querySelectorAll('[data-pick]')) {
+        button.addEventListener('click', () => show(button.dataset.pick));
+      }
+    </script>
+  </body>
+</html>
